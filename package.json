@@ -1,0 +1,6 @@
+{
+  "name": "torneo-de-golf",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=18" }
+}
