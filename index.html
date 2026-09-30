@@ -507,6 +507,7 @@ table.h2h{border-collapse:collapse;width:100%}
 .exportbox p{margin:0;max-width:62ch;font-size:.9rem}
 .top-banner{margin-bottom:1.1rem}
 .exportbox.warn{border-left-color:var(--gold)}
+.period-chip{display:flex;align-items:center;justify-content:space-between;gap:.8rem;flex-wrap:wrap;background:var(--paper);border:1px solid var(--line);border-left:4px solid var(--blue);border-radius:10px;padding:.55rem .9rem;margin:-.2rem 0 1rem;font-size:.9rem}
 </style>
 </head>
 <body>
@@ -540,14 +541,14 @@ var DEF_SI = [7,3,15,1,11,5,17,9,13,8,16,2,12,4,14,18,6,10];
 var MODE_LABEL = { gross: 'Gross', net: 'Neto con hándicap', stableford: 'Stableford' };
 
 var ui = {
-  tab: 'tabla', mode: null, tid: null, mtab: 'partidos', mForm: null, h2h: null, statPlayer: 'all', statCourse: '', statTour: '',
+  tab: 'tabla', mode: null, tid: null, mtab: 'partidos', mForm: null, h2h: null, statPlayer: 'all', statCourse: '', statTour: '', statPeriod: '', statFrom: '', statTo: '',
   profile: null, ptab: 'resumen', expand: null, expandF: null,
   form: null, photo: null, courseForm: null, tForm: null, chron: null, pe: null, he: null
 };
 (function restoreNav(){
   try {
     var n = JSON.parse(ssGet('nav') || 'null');
-    if (n) ['tab','profile','ptab','statPlayer','statCourse','statTour','expand','expandF','mode','tid','mtab','h2h'].forEach(function(k){ if (n[k] != null) ui[k] = n[k]; });
+    if (n) ['tab','profile','ptab','statPlayer','statCourse','statTour','statPeriod','statFrom','statTo','expand','expandF','mode','tid','mtab','h2h'].forEach(function(k){ if (n[k] != null) ui[k] = n[k]; });
   } catch (e) {}
   if (ui.tab === 'canchas') ui.tab = 'torneos';
   if (!TABS.some(function(t){ return t[0] === ui.tab; })) ui.tab = 'tabla';
@@ -580,7 +581,7 @@ function parCls(n){ return n < 0 ? 'under' : ''; }
 function avg(s, n, d){ return n ? (s / n).toFixed(d == null ? 1 : d).replace('.', ',') : '–'; }
 function plural(n, a, b){ return n + ' ' + (n === 1 ? a : b); }
 function clubLabel(k){ for (var i = 0; i < CLUBS.length; i++) if (CLUBS[i][0] === k) return CLUBS[i][1]; return k === 'putter' ? 'Putter' : ''; }
-function saveNav(){ ssSet('nav', JSON.stringify({ tab: ui.tab, profile: ui.profile, ptab: ui.ptab, statPlayer: ui.statPlayer, statCourse: ui.statCourse, statTour: ui.statTour, expand: ui.expand, expandF: ui.expandF, mode: ui.mode, tid: ui.tid, mtab: ui.mtab, h2h: ui.h2h })); }
+function saveNav(){ ssSet('nav', JSON.stringify({ tab: ui.tab, profile: ui.profile, ptab: ui.ptab, statPlayer: ui.statPlayer, statCourse: ui.statCourse, statTour: ui.statTour, statPeriod: ui.statPeriod, statFrom: ui.statFrom, statTo: ui.statTo, expand: ui.expand, expandF: ui.expandF, mode: ui.mode, tid: ui.tid, mtab: ui.mtab, h2h: ui.h2h })); }
 function icon(k){ return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICONS[k] + '</svg>'; }
 
 function normalize(s){
@@ -777,9 +778,9 @@ function tourFacts(rounds){
   f.cards = rounds.length;
   return f;
 }
-function bagFor(pid){
+function bagFor(pid, keep){
   return CLUBS.map(function(c){
-    var ys = S.shots.filter(function(s){ return s.p === pid && s.c === c[0]; }).map(function(s){ return s.y; });
+    var ys = S.shots.filter(function(s){ return s.p === pid && s.c === c[0] && (!keep || keep(s.d)); }).map(function(s){ return s.y; });
     return { k: c[0], l: c[1], n: ys.length, avg: ys.length ? sum(ys) / ys.length : null, max: ys.length ? Math.max.apply(null, ys) : null, min: ys.length ? Math.min.apply(null, ys) : null };
   });
 }
@@ -1402,7 +1403,7 @@ function profileSummary(p, a, rs){
   return h;
 }
 function evoPoints(rs){
-  return rs.filter(function(r){ return calc(r).complete; }).sort(sortRounds).map(function(r){ return { x: (r.date || '~') + '|' + (r.ts || 0), label: r.date ? fmtDate(r.date).slice(0, 5) : (r.tid ? 'R' + r.fecha : 'Libre'), y: calc(r).gross, info: tour(r.tid) ? tour(r.tid).name + ', ronda ' + r.fecha : 'ronda libre' }; });
+  return rs.filter(function(r){ return calc(r).complete; }).sort(sortRounds).map(function(r){ return { x: r.date ? r.date : '~' + (r.ts || 0), label: r.date ? fmtDate(r.date).slice(0, 5) : (r.tid ? 'R' + r.fecha : 'Libre'), y: calc(r).gross, info: tour(r.tid) ? tour(r.tid).name + ', ronda ' + r.fecha : 'ronda libre' }; });
 }
 function profileDistances(p, bag){
   var w = canWrite();
@@ -1931,6 +1932,37 @@ function saveMatch(){
 }
 
 /* ---------- Estadísticas ---------- */
+function statYears(){
+  var ys = {};
+  S.rounds.forEach(function(r){ if (r.date) ys[String(r.date).slice(0, 4)] = 1; });
+  S.shots.forEach(function(s){ if (s.d) ys[String(s.d).slice(0, 4)] = 1; });
+  return Object.keys(ys).filter(function(y){ return /^\d{4}$/.test(y); }).sort().reverse();
+}
+function periodRange(){
+  var f = ui.statFrom, t = ui.statTo;
+  if (f && t && f > t) { var x = f; f = t; t = x; }
+  return [f, t];
+}
+function periodFilter(){
+  var p = ui.statPeriod;
+  if (!p) return null;
+  if (p === 'custom') {
+    var r = periodRange(), f = r[0], t = r[1];
+    if (!f && !t) return null;
+    return function(d){ return !!d && (!f || d >= f) && (!t || d <= t); };
+  }
+  return function(d){ return !!d && String(d).slice(0, 4) === p; };
+}
+function periodLabel(){
+  var p = ui.statPeriod;
+  if (!p) return '';
+  if (p !== 'custom') return 'Año ' + p;
+  var r = periodRange(), f = r[0], t = r[1];
+  if (f && t) return 'Del ' + fmtDate(f) + ' al ' + fmtDate(t);
+  if (f) return 'Desde el ' + fmtDate(f);
+  if (t) return 'Hasta el ' + fmtDate(t);
+  return '';
+}
 function viewStats(){
   var hasShots = S.shots.some(function(s){ return player(s.p); });
   if (!S.rounds.length && !hasShots) return '<section class="card"><div class="card-body empty"><h2>Estadísticas</h2><p>Aparecen cuando se cargan tarjetas o distancias por palo.</p></div></section>';
@@ -1938,12 +1970,20 @@ function viewStats(){
   if (pid !== 'all' && !player(pid)) pid = ui.statPlayer = 'all';
   if (cid && !course(cid)) cid = ui.statCourse = '';
   if (tid && tid !== '__free' && !tour(tid)) tid = ui.statTour = '';
-  var rs = S.rounds.filter(function(r){ return (pid === 'all' || r.playerId === pid) && (!cid || r.courseId === cid) && (!tid || (tid === '__free' ? !r.tid : r.tid === tid)); });
+  var years = statYears();
+  if (ui.statPeriod && ui.statPeriod !== 'custom' && years.indexOf(ui.statPeriod) < 0) ui.statPeriod = '';
+  var inPeriod = periodFilter();
+  var rs = S.rounds.filter(function(r){ return (pid === 'all' || r.playerId === pid) && (!cid || r.courseId === cid) && (!tid || (tid === '__free' ? !r.tid : r.tid === tid)) && (!inPeriod || inPeriod(r.date)); });
   var a = aggregate(rs);
+  var plabel = periodLabel();
   var h = '<div class="sec-title" style="margin-top:0"><h2>' + (pid === 'all' ? 'Estadísticas' : esc(player(pid).name)) + '</h2><div class="filters">' +
     '<label class="fld">Jugador<select data-stat="player"><option value="all">Todos</option>' + S.players.map(function(p){ return '<option value="' + p.id + '"' + (p.id === pid ? ' selected' : '') + '>' + esc(p.name) + '</option>'; }).join('') + '</select></label>' +
     '<label class="fld">Torneo<select data-stat="tour"><option value="">Todas las tarjetas</option>' + S.tournaments.map(function(t){ return '<option value="' + t.id + '"' + (t.id === tid ? ' selected' : '') + '>' + esc(t.name) + '</option>'; }).join('') + (S.rounds.some(function(r){ return !r.tid; }) ? '<option value="__free"' + (tid === '__free' ? ' selected' : '') + '>Solo rondas libres</option>' : '') + '</select></label>' +
-    '<label class="fld">Cancha<select data-stat="course"><option value="">Todas</option>' + S.courses.map(function(c){ return '<option value="' + c.id + '"' + (c.id === cid ? ' selected' : '') + '>' + esc(c.name) + '</option>'; }).join('') + '</select></label></div></div>';
+    '<label class="fld">Cancha<select data-stat="course"><option value="">Todas</option>' + S.courses.map(function(c){ return '<option value="' + c.id + '"' + (c.id === cid ? ' selected' : '') + '>' + esc(c.name) + '</option>'; }).join('') + '</select></label>' +
+    '<label class="fld">Período<select data-stat="period"><option value="">Todo el historial</option>' + years.map(function(y){ return '<option value="' + y + '"' + (ui.statPeriod === y ? ' selected' : '') + '>' + y + '</option>'; }).join('') + '<option value="custom"' + (ui.statPeriod === 'custom' ? ' selected' : '') + '>Elegir fechas</option></select></label>' +
+    (ui.statPeriod === 'custom' ? '<label class="fld">Desde<input type="date" data-stat="from" value="' + esc(ui.statFrom || '') + '"></label><label class="fld">Hasta<input type="date" data-stat="to" value="' + esc(ui.statTo || '') + '"></label>' : '') +
+    '</div></div>' +
+    (plabel ? '<div class="period-chip"><span>Mostrando: <b>' + esc(plabel) + '</b>. Las tarjetas sin fecha no se incluyen.</span><button class="link" data-action="period-clear">Ver todo el historial</button></div>' : '');
   if (rs.length) {
     h += '<section class="tiles">' +
       tile('Tarjetas', a.rounds, plural(a.complete, 'completa', 'completas')) +
@@ -1971,16 +2011,16 @@ function viewStats(){
         '</tbody></table></div></section>';
     }
   } else if (S.rounds.length) {
-    h += '<section class="card"><div class="card-body"><p class="muted" style="margin:0">No hay tarjetas con estos filtros.</p></div></section>';
+    h += '<section class="card"><div class="card-body"><p class="muted" style="margin:0">' + (plabel ? 'No hay tarjetas en este período con estos filtros.' : 'No hay tarjetas con estos filtros.') + '</p></div></section>';
   }
-  h += distanceStats(pid);
+  h += distanceStats(pid, inPeriod, plabel);
   return h;
 }
-function distanceStats(pid){
-  var ps = S.players.filter(function(p){ return (pid === 'all' || p.id === pid) && S.shots.some(function(s){ return s.p === p.id; }); });
-  if (!ps.length) return '<section class="card"><div class="card-head"><h2>Distancias por palo</h2></div><div class="card-body"><p class="muted" style="margin:0">Todavía no hay distancias cargadas. Se cargan desde el perfil de cada jugador, en la pestaña Distancias.</p></div></section>';
-  if (pid !== 'all') return '<section class="card"><div class="card-head"><h2>Distancias por palo</h2><span class="muted" style="font-size:.85rem">en yardas</span></div><div class="card-body">' + bagChart(bagFor(pid)) + '</div></section>';
-  var bags = ps.map(function(p){ return { p: p, bag: bagFor(p.id) }; });
+function distanceStats(pid, keep, plabel){
+  var ps = S.players.filter(function(p){ return (pid === 'all' || p.id === pid) && S.shots.some(function(s){ return s.p === p.id && (!keep || keep(s.d)); }); });
+  if (!ps.length) return '<section class="card"><div class="card-head"><h2>Distancias por palo</h2></div><div class="card-body"><p class="muted" style="margin:0">' + (keep && S.shots.length ? 'No hay distancias cargadas en este período.' : 'Todavía no hay distancias cargadas. Se cargan desde el perfil de cada jugador, en la pestaña Distancias.') + '</p></div></section>';
+  if (pid !== 'all') return '<section class="card"><div class="card-head"><h2>Distancias por palo</h2><span class="muted" style="font-size:.85rem">en yardas' + (plabel ? ', ' + esc(plabel.charAt(0).toLowerCase() + plabel.slice(1)) : '') + '</span></div><div class="card-body">' + bagChart(bagFor(pid, keep)) + '</div></section>';
+  var bags = ps.map(function(p){ return { p: p, bag: bagFor(p.id, keep) }; });
   var h = '<section class="card"><div class="card-head"><h2>Distancias por palo</h2><span class="muted" style="font-size:.85rem">Promedio en yardas. En rojo, el más largo de cada palo.</span></div><div class="hscroll"><table class="list" style="min-width:' + (140 + ps.length * 80) + 'px"><thead><tr><th>Palo</th>' +
     bags.map(function(b){ return '<th class="n"><span class="th-av">' + avatar(b.p, 26) + esc(b.p.name) + '</span></th>'; }).join('') + '</tr></thead><tbody>';
   CLUBS.forEach(function(c, i){
@@ -2223,6 +2263,7 @@ var H = {
   'del-round': function(b){ var id = b.dataset.id; closeModal(true); askConfirm('Eliminar tarjeta', 'La tarjeta se borra del torneo y deja de contar en la tabla.', 'Eliminar').then(function(ok){ if (ok) commit(function(st){ st.rounds = st.rounds.filter(function(r){ return r.id !== id; }); }, 'Tarjeta eliminada'); }); },
   'save-round': function(){ saveRound(); },
   'free-new': function(){ var f = newForm(); f.tid = ''; f.fecha = 0; f.date = today(); if (!course(f.courseId) && S.courses[0]) f.courseId = S.courses[0].id; ui.form = f; ui.photo = null; goTab('cargar'); },
+  'period-clear': function(){ ui.statPeriod = ''; saveNav(); render(); },
   'retry-sync': function(){ sync(true).then(function(){ if (!server.error && !server.ready) location.reload(); render(); }); },
   'ask-key': function(){ askKey(null); },
   'banner-hide': function(){ ui.bannerHidden = true; render(); },
@@ -2413,6 +2454,13 @@ document.addEventListener('change', function(e){
   else if (t.dataset.stat === 'player') { ui.statPlayer = t.value; saveNav(); render(); }
   else if (t.dataset.stat === 'course') { ui.statCourse = t.value; saveNav(); render(); }
   else if (t.dataset.stat === 'tour') { ui.statTour = t.value; saveNav(); render(); }
+  else if (t.dataset.stat === 'period') {
+    ui.statPeriod = t.value;
+    if (t.value === 'custom' && !ui.statFrom && !ui.statTo) { ui.statFrom = new Date().getFullYear() + '-01-01'; ui.statTo = today(); }
+    saveNav(); render();
+  }
+  else if (t.dataset.stat === 'from') { ui.statFrom = t.value; saveNav(); render(); }
+  else if (t.dataset.stat === 'to') { ui.statTo = t.value; saveNav(); render(); }
   else if (t.dataset.photo != null && ui.photo && ui.photo.found) { ui.photo.found[Number(t.dataset.photo)].playerId = t.value; }
   else if (t.id === 'photo-file') { var file = t.files && t.files[0]; if (file) readPhoto(file); }
   else if (t.id === 'import-file') {
